@@ -1,0 +1,136 @@
+# Sets of half-open intervals [start, end) over numbers. A set is a plain array of [start, end]
+# pairs that are sorted, do not overlap and do not touch, so touching intervals are merged into one.
+# Operations return the updated set.
+
+# Returns the position of the first interval whose `side` (0 start, 1 end) is above `x`, or at or
+# above it when `strict` is false. Returns the number of intervals if there is none.
+def _first(set, side, x, strict):
+  var lo = 0
+  | var hi = len(set)
+  | let _ = while (lo < hi):
+      let mid = floor((lo + hi) / 2)
+      | let v = set[mid][side]
+      | if (if (strict): v > x else: v >= x): hi = mid else: lo = mid + 1
+    end
+  | lo
+end
+
+def _check(s, e):
+  if (e < s): error("interval: the end is before the start: [" + to_string(s) + ", " + to_string(e) + ")") else: None;
+
+# Returns an empty set.
+def new(): [];
+
+# Returns the set holding the given [start, end] pairs, in any order and possibly overlapping.
+# Empty pairs are dropped.
+def from(pairs):
+  let _ = map(pairs, fn(p): _check(p[0], p[1]);)
+  | let sorted_pairs = sort(filter(pairs, fn(p): p[0] < p[1];))
+  | var out = []
+  | var i = 0
+  | let n = len(sorted_pairs)
+  | let _ = while (i < n):
+      let p = sorted_pairs[i]
+      | let m = len(out)
+      | let _ = if (m > 0 && p[0] <= out[m - 1][1]):
+          out[m - 1] = [out[m - 1][0], max(out[m - 1][1], p[1])]
+        else:
+          out += [p]
+      | i = i + 1
+    end
+  | out
+end
+
+# Returns the number of intervals.
+def count(set): len(set);
+
+# Returns the total length covered.
+def length(set): fold(set, 0, fn(acc, p): acc + p[1] - p[0];);
+
+# Adds [s, e), merging it with the intervals it overlaps or touches.
+def add(set, s, e):
+  let _ = _check(s, e)
+  | if (s == e):
+      set
+    else:
+      do
+        let lo = _first(set, 1, s, false)
+        | let hi = _first(set, 0, e, true)
+        | let start = if (lo < hi): min(s, set[lo][0]) else: s
+        | let end_ = if (lo < hi): max(e, set[hi - 1][1]) else: e
+        | set[0:lo] + [[start, end_]] + set[hi:len(set)]
+      end
+end
+
+# Removes [s, e), cutting the intervals it overlaps.
+def remove(set, s, e):
+  let _ = _check(s, e)
+  | if (s == e):
+      set
+    else:
+      do
+        let lo = _first(set, 1, s, true)
+        | let hi = _first(set, 0, e, false)
+        | let left = if (lo < hi && set[lo][0] < s): [[set[lo][0], s]] else: []
+        | let right = if (lo < hi && set[hi - 1][1] > e): [[e, set[hi - 1][1]]] else: []
+        | set[0:lo] + left + right + set[hi:len(set)]
+      end
+end
+
+# Returns the interval containing the point `x`, or None.
+def covering(set, x):
+  let i = _first(set, 1, x, true)
+  | if (i < len(set) && set[i][0] <= x): set[i] else: None;
+
+# Returns true if the point `x` is inside the set.
+def contains(set, x): !is_none(covering(set, x));
+
+# Returns true if [s, e) shares a point with the set.
+def overlaps(set, s, e):
+  let i = _first(set, 1, s, true)
+  | i < len(set) && set[i][0] < e;
+
+# Returns the parts of [lo, hi) that the set does not cover.
+def gaps(set, lo, hi):
+  var out = []
+  | var at = lo
+  | var i = 0
+  | let n = len(set)
+  | let _ = while (i < n && at < hi):
+      let p = set[i]
+      | let _ = if (p[1] > at):
+          do
+            let _ = if (p[0] > at): out += [[at, min(p[0], hi)]] else: None
+            | at = max(at, p[1])
+          end
+        else:
+          None
+      | i = i + 1
+    end
+  | let _ = if (at < hi): out += [[at, hi]] else: None
+  | out
+end
+
+# Returns the parts covered by both sets.
+def intersect(a, b):
+  var out = []
+  | var i = 0
+  | var j = 0
+  | let _ = while (i < len(a) && j < len(b)):
+      let s = max(a[i][0], b[j][0])
+      | let e = min(a[i][1], b[j][1])
+      | let _ = if (s < e): out += [[s, e]] else: None
+      | let _ = if (a[i][1] < b[j][1]): i = i + 1 else: j = j + 1
+    end
+  | out
+end
+
+# Returns the parts covered by either set.
+def union(a, b): from(a + b);
+
+# Returns the parts of `a` that `b` does not cover.
+def subtract(a, b):
+  if (is_empty(a)):
+    []
+  else:
+    intersect(a, gaps(b, a[0][0], a[len(a) - 1][1]));

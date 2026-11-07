@@ -1,0 +1,44 @@
+import "interval"
+
+# Each pair runs the same work at two sizes. Adding rebuilds the array, so its cost per call grows
+# with the set; lookups are O(log n) and the set operations are linear.
+
+def add_many(n):
+  var s = interval::new()
+  | var i = 0
+  | let _ = while (i < n):
+      let start = (i * 7919) % (n * 4)
+      | s = interval::add(s, start * 2, start * 2 + 1)
+      | i = i + 1
+    end
+  | interval::count(s)
+end
+
+def lookups(n):
+  let s = interval::from(map(range(0, n - 1), fn(i): [i * 4, i * 4 + 2];))
+  | var i = 0
+  | var hits = 0
+  | let _ = while (i < n):
+      hits = hits + if (interval::contains(s, (i * 7919) % (n * 4))): 1 else: 0
+      | i = i + 1
+    end
+  | hits
+end
+
+def combine(n):
+  let a = interval::from(map(range(0, n - 1), fn(i): [i * 6, i * 6 + 4];))
+  | let b = interval::from(map(range(0, n - 1), fn(i): [i * 6 + 2, i * 6 + 5];))
+  | interval::count(interval::union(a, b)) + interval::count(interval::intersect(a, b)) + interval::count(interval::subtract(a, b))
+end
+
+def bench_add_small(): add_many(500);
+
+def bench_add_large(): add_many(2000);
+
+def bench_lookup_small(): lookups(1000);
+
+def bench_lookup_large(): lookups(4000);
+
+def bench_combine_small(): combine(500);
+
+def bench_combine_large(): combine(2000);

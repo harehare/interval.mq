@@ -1,0 +1,211 @@
+import "interval"
+| include "test"
+
+def fails(f): try: f() catch: "failed";
+
+# The integer points 0..n-1 that a set covers.
+def points(set, n): filter(range(0, n - 1), fn(x): interval::contains(set, x););
+
+# The integer points of [s, e) inside 0..n-1, as a model of one interval.
+def model_of(pairs, n): filter(range(0, n - 1), fn(x): len(filter(pairs, fn(p): p[0] <= x && x < p[1];)) > 0;);
+
+# True when a set is sorted, non-empty in every interval, and neither overlaps nor touches.
+def is_normal(set):
+  let bad = filter(range(0, max(len(set) - 1, 1) - 1), fn(i):
+    if (len(set) == 0): false else: set[i][0] >= set[i][1] || (i + 1 < len(set) && set[i][1] >= set[i + 1][0]);
+  )
+  | len(bad) == 0;
+
+# Deterministic [start, end] pairs inside 0..n.
+def pairs(n, count, seed): map(range(0, count - 1), fn(k): [(k * 37 + seed * 11) % n, (k * 37 + seed * 11) % n + 1 + (k * 13 + seed) % 9];);
+
+# =========================================================================
+# from
+# =========================================================================
+
+def test_from_merges_overlapping_and_touching_intervals():
+  assert_eq(interval::from([[5, 8], [1, 3], [3, 4], [10, 12]]), [[1, 4], [5, 8], [10, 12]])
+  | assert_eq(interval::from([[1, 5], [2, 3]]), [[1, 5]])
+  | assert_eq(interval::from([[1, 3], [2, 6], [5, 9]]), [[1, 9]])
+end
+
+def test_from_drops_empty_pairs_and_rejects_reversed_ones():
+  assert_eq(interval::from([[2, 2], [4, 6]]), [[4, 6]])
+  | assert_eq(interval::from([]), [])
+  | assert_eq(fails(fn(): interval::from([[5, 1]]);), "failed")
+end
+
+def test_from_matches_a_plain_model():
+  let input = pairs(120, 40, 3)
+  | let set = interval::from(input)
+  | assert_true(is_normal(set))
+  | assert_eq(points(set, 140), model_of(input, 140))
+end
+
+def test_new_is_empty():
+  assert_eq(interval::new(), [])
+  | assert_eq(interval::count(interval::new()), 0)
+  | assert_eq(interval::length(interval::new()), 0)
+end
+
+# =========================================================================
+# add and remove
+# =========================================================================
+
+def test_add_into_the_gaps():
+  let s = interval::from([[1, 3], [6, 8]])
+  | assert_eq(interval::add(s, 4, 5), [[1, 3], [4, 5], [6, 8]])
+  | assert_eq(interval::add(s, 0, 1), [[0, 3], [6, 8]])
+  | assert_eq(interval::add(s, 3, 6), [[1, 8]])
+  | assert_eq(interval::add(s, 8, 9), [[1, 3], [6, 9]])
+  | assert_eq(interval::add(s, 0, 20), [[0, 20]])
+  | assert_eq(interval::add(s, 2, 7), [[1, 8]])
+end
+
+def test_add_inside_an_existing_interval_changes_nothing():
+  let s = interval::from([[1, 9]])
+  | assert_eq(interval::add(s, 3, 5), [[1, 9]])
+  | assert_eq(interval::add(s, 1, 9), [[1, 9]])
+end
+
+def test_add_to_an_empty_set_and_empty_additions():
+  assert_eq(interval::add(interval::new(), 2, 5), [[2, 5]])
+  | assert_eq(interval::add(interval::from([[1, 2]]), 5, 5), [[1, 2]])
+  | assert_eq(fails(fn(): interval::add(interval::new(), 5, 2);), "failed")
+end
+
+def test_remove_cuts_intervals():
+  let s = interval::from([[1, 10]])
+  | assert_eq(interval::remove(s, 3, 5), [[1, 3], [5, 10]])
+  | assert_eq(interval::remove(s, 0, 4), [[4, 10]])
+  | assert_eq(interval::remove(s, 7, 12), [[1, 7]])
+  | assert_eq(interval::remove(s, 0, 12), [])
+  | assert_eq(interval::remove(s, 1, 10), [])
+  | assert_eq(interval::remove(s, 20, 30), [[1, 10]])
+end
+
+def test_remove_across_several_intervals():
+  let s = interval::from([[1, 3], [5, 8], [10, 12]])
+  | assert_eq(interval::remove(s, 2, 11), [[1, 2], [11, 12]])
+  | assert_eq(interval::remove(s, 3, 5), [[1, 3], [5, 8], [10, 12]])
+  | assert_eq(interval::remove(s, 6, 6), [[1, 3], [5, 8], [10, 12]])
+  | assert_eq(fails(fn(): interval::remove(s, 6, 2);), "failed")
+end
+
+def test_a_script_of_adds_and_removes_matches_a_plain_model():
+  var set = interval::new()
+  | var model = map(range(0, 149), fn(i): false;)
+  | var violations = []
+  | var k = 0
+  | let _ = while (k < 120):
+      let s = (k * 41 + 7) % 140
+      | let e = s + 1 + (k * 17) % 11
+      | let adding = k % 3 != 2
+      | set = if (adding): interval::add(set, s, e) else: interval::remove(set, s, e)
+      | let _ = map(range(s, e - 1), fn(x): if (x < 150): model[x] = adding else: None;)
+      | violations = if (!is_normal(set)): violations + [k] else: violations
+      | k = k + 1
+    end
+  | assert_eq(violations, [])
+  | assert_eq(points(set, 150), filter(range(0, 149), fn(x): model[x];))
+end
+
+# =========================================================================
+# queries
+# =========================================================================
+
+def test_contains_is_half_open():
+  let s = interval::from([[2, 5], [8, 9]])
+  | assert_eq(interval::contains(s, 1), false)
+  | assert_true(interval::contains(s, 2))
+  | assert_true(interval::contains(s, 4))
+  | assert_eq(interval::contains(s, 5), false)
+  | assert_true(interval::contains(s, 8))
+  | assert_eq(interval::contains(s, 9), false)
+  | assert_eq(interval::contains(interval::new(), 3), false)
+end
+
+def test_covering_returns_the_interval():
+  let s = interval::from([[2, 5], [8, 9]])
+  | assert_eq(interval::covering(s, 3), [2, 5])
+  | assert_eq(interval::covering(s, 8), [8, 9])
+  | assert_none(interval::covering(s, 6))
+end
+
+def test_overlaps_is_half_open():
+  let s = interval::from([[2, 5], [8, 9]])
+  | assert_true(interval::overlaps(s, 4, 6))
+  | assert_true(interval::overlaps(s, 0, 3))
+  | assert_eq(interval::overlaps(s, 5, 8), false)
+  | assert_eq(interval::overlaps(s, 0, 2), false)
+  | assert_true(interval::overlaps(s, 0, 100))
+  | assert_true(interval::overlaps(s, 8, 9))
+  | assert_eq(interval::overlaps(s, 9, 12), false)
+end
+
+def test_count_and_length():
+  let s = interval::from([[1, 3], [5, 8], [10, 12]])
+  | assert_eq(interval::count(s), 3)
+  | assert_eq(interval::length(s), 7)
+end
+
+def test_gaps_between_bounds():
+  let s = interval::from([[2, 4], [6, 8]])
+  | assert_eq(interval::gaps(s, 0, 10), [[0, 2], [4, 6], [8, 10]])
+  | assert_eq(interval::gaps(s, 2, 8), [[4, 6]])
+  | assert_eq(interval::gaps(s, 3, 7), [[4, 6]])
+  | assert_eq(interval::gaps(s, 0, 1), [[0, 1]])
+  | assert_eq(interval::gaps(s, 9, 12), [[9, 12]])
+  | assert_eq(interval::gaps(s, 2, 4), [])
+  | assert_eq(interval::gaps(interval::new(), 1, 5), [[1, 5]])
+end
+
+# =========================================================================
+# set operations
+# =========================================================================
+
+def test_set_operations_match_a_plain_model():
+  let pa = pairs(100, 25, 1)
+  | let pb = pairs(100, 20, 2)
+  | let a = interval::from(pa)
+  | let b = interval::from(pb)
+  | let in_a = model_of(pa, 120)
+  | let in_b = model_of(pb, 120)
+  | assert_eq(points(interval::union(a, b), 120), sort(uniq(in_a + in_b)))
+  | assert_eq(points(interval::intersect(a, b), 120), filter(in_a, fn(x): contains(in_b, x);))
+  | assert_eq(points(interval::subtract(a, b), 120), filter(in_a, fn(x): !contains(in_b, x);))
+  | assert_true(is_normal(interval::union(a, b)))
+  | assert_true(is_normal(interval::intersect(a, b)))
+  | assert_true(is_normal(interval::subtract(a, b)))
+end
+
+def test_intersect_examples():
+  assert_eq(interval::intersect(interval::from([[1, 5], [8, 12]]), interval::from([[3, 9]])), [[3, 5], [8, 9]])
+  | assert_eq(interval::intersect(interval::from([[1, 3]]), interval::from([[3, 5]])), [])
+  | assert_eq(interval::intersect(interval::new(), interval::from([[3, 5]])), [])
+end
+
+def test_subtract_examples():
+  assert_eq(interval::subtract(interval::from([[1, 10]]), interval::from([[3, 4], [6, 7]])), [[1, 3], [4, 6], [7, 10]])
+  | assert_eq(interval::subtract(interval::from([[1, 4]]), interval::from([[0, 9]])), [])
+  | assert_eq(interval::subtract(interval::from([[1, 4]]), interval::new()), [[1, 4]])
+  | assert_eq(interval::subtract(interval::new(), interval::from([[1, 4]])), [])
+end
+
+def test_operations_do_not_modify_their_inputs():
+  let a = interval::from([[1, 5]])
+  | let b = interval::from([[3, 9]])
+  | let u = interval::union(a, b)
+  | let c = interval::add(a, 7, 8)
+  | assert_eq(a, [[1, 5]])
+  | assert_eq(b, [[3, 9]])
+  | assert_eq(u, [[1, 9]])
+  | assert_eq(c, [[1, 5], [7, 8]])
+end
+
+def test_works_with_fractions():
+  let s = interval::add(interval::from([[0.5, 1.5]]), 1.5, 2.25)
+  | assert_eq(s, [[0.5, 2.25]])
+  | assert_true(interval::contains(s, 2.2))
+  | assert_eq(interval::contains(s, 2.25), false)
+end
